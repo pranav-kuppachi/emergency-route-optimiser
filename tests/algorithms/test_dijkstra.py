@@ -4,15 +4,11 @@ import unittest
 
 from ero.algorithms.dijkstra import dijkstra
 from ero.graph.road_graph import RoadGraph
+from ero.queues.radix_heap import RadixHeap
 
 
 class TestHeap:
-    """
-    A small adapter around Python's built-in heapq.
-
-    We use this only to test Dijkstra before connecting
-    our four custom heap implementations.
-    """
+    """Simple heapq adapter for testing Dijkstra independently."""
 
     def __init__(self):
         self.items = []
@@ -29,38 +25,28 @@ class TestHeap:
 
 class TestDijkstra(unittest.TestCase):
 
+    def setUp(self):
+        self.graph = RoadGraph()
+        self.graph.add_road("A", "B", 4)
+        self.graph.add_road("A", "C", 10)
+        self.graph.add_road("B", "C", 3)
+        self.graph.add_road("B", "D", 8)
+        self.graph.add_road("C", "D", 2)
+
     def test_shortest_distances(self):
-        # Create a small road network.
-        graph = RoadGraph()
-        graph.add_road("A", "B", 4)
-        graph.add_road("A", "C", 10)
-        graph.add_road("B", "C", 3)
-        graph.add_road("B", "D", 8)
-        graph.add_road("C", "D", 2)
+        distances = dijkstra(self.graph, "A", TestHeap())
 
-        # Calculate shortest distances starting from A.
-        distances = dijkstra(graph, "A", TestHeap())
-
-        # The shortest routes should be:
-        # A -> A = 0
-        # A -> B = 4
-        # A -> B -> C = 7
-        # A -> B -> C -> D = 9
         self.assertEqual(distances["A"], 0)
         self.assertEqual(distances["B"], 4)
         self.assertEqual(distances["C"], 7)
         self.assertEqual(distances["D"], 9)
 
     def test_unreachable_location(self):
-        graph = RoadGraph()
-        graph.add_road("A", "B", 5)
-        graph.add_location("C")
+        self.graph.add_location("E")
 
-        distances = dijkstra(graph, "A", TestHeap())
+        distances = dijkstra(self.graph, "A", TestHeap())
 
-        self.assertEqual(distances["A"], 0)
-        self.assertEqual(distances["B"], 5)
-        self.assertEqual(distances["C"], float("inf"))
+        self.assertEqual(distances["E"], float("inf"))
 
     def test_improved_route(self):
         graph = RoadGraph()
@@ -70,16 +56,34 @@ class TestDijkstra(unittest.TestCase):
 
         distances = dijkstra(graph, "A", TestHeap())
 
-        # B is first discovered at 10, then improved to 5.
         self.assertEqual(distances["B"], 5)
         self.assertEqual(distances["C"], 2)
 
     def test_invalid_start(self):
-        graph = RoadGraph()
-        graph.add_location("A")
-
         with self.assertRaises(KeyError):
-            dijkstra(graph, "Z", TestHeap())
+            dijkstra(self.graph, "Z", TestHeap())
+
+    def test_radix_heap_integration(self):
+        self.graph.add_location("E")
+
+        distances = dijkstra(self.graph, "A", RadixHeap())
+
+        self.assertEqual(distances["A"], 0)
+        self.assertEqual(distances["B"], 4)
+        self.assertEqual(distances["C"], 7)
+        self.assertEqual(distances["D"], 9)
+        self.assertEqual(distances["E"], float("inf"))
+
+    def test_directed_roads(self):
+        graph = RoadGraph()
+        graph.add_road("A", "B", 5, bidirectional=False)
+        graph.add_road("B", "C", 3, bidirectional=False)
+
+        forward = dijkstra(graph, "A", RadixHeap())
+        backward = dijkstra(graph, "C", RadixHeap())
+
+        self.assertEqual(forward["C"], 8)
+        self.assertEqual(backward["A"], float("inf"))
 
 
 if __name__ == "__main__":

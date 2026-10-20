@@ -1,3 +1,4 @@
+
 class _Node:
     def __init__(self, priority, item):
         self.priority = priority
@@ -25,6 +26,12 @@ class SkewHeap:
         return first
 
     def push(self, priority, item):
+        if not isinstance(priority, int) or isinstance(priority, bool):
+            raise TypeError("Priority must be an integer")
+
+        if priority < 0:
+            raise ValueError("Priority cannot be negative")
+
         new_node = _Node(priority, item)
         self.root = self._merge(self.root, new_node)
 

@@ -5,13 +5,25 @@ from ero.graph.road_graph import RoadGraph
 
 
 class TestSkewHeap(unittest.TestCase):
+    def test_negative_priority_rejected(self):
+    	heap = SkewHeap()
 
+    	with self.assertRaises(ValueError):
+             heap.push(-1, "hospital")
+
+    def test_non_integer_priority_rejected(self):
+    	heap = SkewHeap()
+
+    	for priority in ["high", 1.5, True]:
+            with self.subTest(priority=priority):
+            	with self.assertRaises(TypeError):
+                	heap.push(priority, "hospital")
     def test_empty_heap(self):
         heap = SkewHeap()
         self.assertTrue(heap.is_empty())
 
         with self.assertRaises(IndexError):
-            heap.pop_min()
+            heap.pop_min()	
 
     def test_single_element(self):
         heap = SkewHeap()

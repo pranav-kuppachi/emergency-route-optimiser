@@ -1,19 +1,39 @@
+
 from typing import Protocol, TypeVar
 
+# T represents the type of item stored in a heap.
+# In our project, an item will usually be a location ID.
 T = TypeVar("T")
 
 
-class PriorityQueue(Protocol[T]):
-    """Common interface for the project's minimum-priority queues."""
+class HeapInterface(Protocol[T]):
 
-    def push(self, priority: int, item: T) -> None:
-        """Insert an item with its priority."""
+    """
+    Common interface for all priority queues
+
+    Every heap must support:
+    1. Inserting an item with a priority.
+    2. Removing the item with the minimum priority.
+    3. Checking whether the heap is empty.
+
+    Each heap implements these operations using its own
+    internal data structure.
+    """
+
+    def push(self, priority: int, item: T):
+        """
+        Insert an item into the heap.
+        """
         ...
 
     def pop_min(self) -> tuple[int, T]:
-        """Remove and return the minimum-priority (priority, item) pair."""
+        """
+        Remove and return an item with the minimum priority
+        """
         ...
 
     def is_empty(self) -> bool:
-        """Return whether the queue contains no items."""
+        """
+        Check whether the heap contains any items.
+        """
         ...

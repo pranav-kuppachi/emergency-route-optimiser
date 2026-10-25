@@ -1,36 +1,58 @@
+
 """
 Stores the road network as a graph and provides
 methods to add locations and roads and retrieve
 a location's neighbours.
 """
 
-class RoadGraph: #Stores undirected road networks with non negative integers
 
-    def __init__(self): #Initializing function
-        self.adjacency_list = {} 
+class RoadGraph:
+    def __init__(self):
+        self.adjacency_list = {}
 
-    def add_location(self, location): #Adds Location only if location hasn't been added.
-        if location in self.adjacency_list:
-             return
-        self.adjacency_list[location] = [] #If location doesn't exist, we add it to dictionary with empty list as it's neighbours.
+        # Additional metadata for location search and map display.
+        self.coordinates = {}
+        self.location_names = {}
+        self.location_tags = {}
+        self.road_names = {}
 
-    def add_road(self, source, destination, distance, bidirectional = True): #Add road between 2 locations with distance
+    def add_location(self, location, coordinates=None, name=None, tags=None):
+        if location not in self.adjacency_list:
+            self.adjacency_list[location] = []
+
+        if coordinates is not None:
+            self.coordinates[location] = coordinates
+
+        if name:
+            self.location_names[location] = name
+
+        if tags:
+            self.location_tags[location] = dict(tags)
+
+    def add_road(
+        self, source, destination, distance, bidirectional=True, name=None
+    ):
         self.add_location(source)
         self.add_location(destination)
+
         self.adjacency_list[source].append((destination, distance))
-        if bidirectional: #Add the forward road. If the road is bidirectional, add the reverse road.
+
+        if name:
+            self.road_names[(source, destination)] = name
+
+        if bidirectional:
             self.adjacency_list[destination].append((source, distance))
-        
-    def neighbors(self, location): #Returns the list of neighboring locations and their road distances
+
+            if name:
+                self.road_names[(destination, source)] = name
+
+    def neighbors(self, location):
         if location not in self.adjacency_list:
             raise KeyError("Location does not exist")
-        return self.adjacency_list[location].copy() #Returns copy of the list instead of the original list itself, so we don't accidentally modify data
+        return self.adjacency_list[location].copy()
 
-    def locations(self): #Returns all location IDs in our graph
+    def locations(self):
         return list(self.adjacency_list)
 
-    def __len__(self): #Returns total number of locations
+    def __len__(self):
         return len(self.adjacency_list)
-    
-
-    

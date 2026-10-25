@@ -21,3 +21,9 @@ env/
 
 # Temporary benchmark output
 results/*.tmp
+
+# Local virtual environments and temporary files
+.venv*/
+*.save
+*.bak
+*~

@@ -1,0 +1,476 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Emergency Route Optimizer</title>
+  <link rel="stylesheet"
+        href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <p class="eyebrow">DATA STRUCTURES · SHORTEST PATHS</p>
+      <h1>Emergency Route Optimizer</h1>
+      <p class="subtitle">One graph. One algorithm. Four priority queues.</p>
+    </div>
+    <div class="status"><span></span> Road network loaded</div>
+  </header>
+
+  <main class="layout">
+    <section class="panel controls">
+      <h2>Plan a route</h2>
+      <p class="muted">Choose locations from the loaded Coimbatore map.</p>
+
+      <label for="start">Starting location</label>
+      <input id="start" placeholder="Search e.g. Central Theater"
+             autocomplete="off">
+      <div id="start-results" class="suggestions"></div>
+
+      <label for="destination">Destination</label>
+      <input id="destination" placeholder="Search e.g. RS Puram"
+             autocomplete="off">
+      <div id="destination-results" class="suggestions"></div>
+
+      <label for="heap">Priority queue</label>
+      <select id="heap">
+        <option value="radix">Radix Heap</option>
+        <option value="binomial">Binomial Heap</option>
+        <option value="leftist">Leftist Heap</option>
+        <option value="skew">Skew Heap</option>
+      </select>
+
+      <button id="route-btn" class="primary">Find shortest route</button>
+      <button id="compare-btn" class="secondary">Compare all four heaps</button>
+      <p id="message" class="message" role="status">
+        Search for both locations to begin.
+      </p>
+
+      <div id="route-summary" class="summary hidden"></div>
+    </section>
+
+    <section class="panel map-panel">
+      <div class="map-heading">
+        <div>
+          <h2>Route map</h2>
+          <p class="muted">OpenStreetMap · Shortest-distance route</p>
+        </div>
+        <span class="map-tag">COIMBATORE</span>
+      </div>
+      <div id="map"></div>
+      <p class="map-note">
+        Routes use the included OSM extract and do not account for live traffic.
+      </p>
+    </section>
+
+    <section class="panel results-panel">
+      <h2>Heap performance comparison</h2>
+      <p class="muted">All heaps use the same Dijkstra algorithm and selected endpoints.</p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Priority queue</th>
+              <th>Distance</th>
+              <th>Time</th>
+              <th>Result</th>
+            </tr>
+          </thead>
+          <tbody id="comparison-body">
+            <tr><td colspan="4">Run a comparison to see results.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p id="correctness" class="correctness"></p>
+
+      <div class="chart-panel">
+        <h3>Time complexity</h3>
+        <p class="muted">Heap operations (in thousands) as the road graph grows.</p>
+        <div id="time-chart" class="line-chart">
+          <p class="chart-placeholder">Run a comparison to see the graph.</p>
+        </div>
+        <p id="time-note" class="chart-note"></p>
+      </div>
+
+      <div class="chart-panel">
+        <h3>Space complexity</h3>
+        <p class="muted">Memory used by the heap (in thousands of words) as the road graph grows.</p>
+        <div id="space-chart" class="line-chart">
+          <p class="chart-placeholder">Run a comparison to see the graph.</p>
+        </div>
+        <p id="space-note" class="chart-note"></p>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    Emergency Route Optimizer · Dijkstra + Binomial, Leftist, Skew and Radix Heaps
+  </footer>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script>
+    const map = L.map("map").setView([11.011, 76.953], 15);
+
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 19,
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+    }).addTo(map);
+
+    let routeLayer = null;
+    let startMarker = null;
+    let destinationMarker = null;
+    const selections = { start: null, destination: null };
+
+    const $ = (id) => document.getElementById(id);
+
+    function showMessage(text, error = false) {
+      $("message").textContent = text;
+      $("message").classList.toggle("error", error);
+    }
+
+    function clearRoute() {
+      if (routeLayer) map.removeLayer(routeLayer);
+      if (startMarker) map.removeLayer(startMarker);
+      if (destinationMarker) map.removeLayer(destinationMarker);
+      routeLayer = startMarker = destinationMarker = null;
+    }
+
+    function drawRoute(result) {
+      clearRoute();
+
+      if (!result.coordinates || !result.coordinates.length) {
+        showMessage("The API returned no route coordinates.", true);
+        return;
+      }
+
+      routeLayer = L.polyline(result.coordinates, {
+        color: "#2475e8", weight: 6, opacity: 0.9
+      }).addTo(map);
+
+      startMarker = L.marker(result.coordinates[0])
+        .addTo(map).bindPopup("Route start");
+      destinationMarker = L.marker(result.coordinates[result.coordinates.length - 1])
+        .addTo(map).bindPopup("Route destination");
+
+      map.fitBounds(routeLayer.getBounds(), { padding: [30, 30] });
+    }
+
+    function renderSummary(result) {
+      $("route-summary").classList.remove("hidden");
+      $("route-summary").innerHTML = `
+        <div class="metric">
+          <span>Shortest distance</span>
+          <strong>${(result.distance_m / 1000).toFixed(2)} km</strong>
+        </div>
+        <div class="metric">
+          <span>Execution time</span>
+          <strong>${result.elapsed_ms.toFixed(3)} ms</strong>
+        </div>
+        <div class="metric">
+          <span>Nodes in route</span>
+          <strong>${result.path.length}</strong>
+        </div>
+        <p class="muted">
+          Start snap: ${result.start_snap_m} m ·
+          Destination snap: ${result.destination_snap_m} m
+        </p>`;
+    }
+
+    /* complexity charts */
+
+    const HEAPS = {
+      radix:    { name: "Radix",    color: "#2168d5", time: "O(E + V log C)",  space: "1 field per element" },
+      binomial: { name: "Binomial", color: "#16804a", time: "O((V + E) log V)", space: "5 fields per node" },
+      leftist:  { name: "Leftist",  color: "#d1481f", time: "O((V + E) log V)", space: "4 fields per node" },
+      skew:     { name: "Skew",     color: "#e0a21b", time: "O((V + E) log V)", space: "3 fields per node", dash: "7 5" }
+    };
+
+    const SIZES = [500, 1000, 2000, 4000, 8000];
+    const EDGE_FACTOR = 2.5;
+    const MAX_WEIGHT = 1000;
+
+    const TIME_COST = {
+      radix:    (E) => E * (1 + Math.log2(MAX_WEIGHT)),
+      binomial: (E) => E * (1 + Math.log2(E)),
+      leftist:  (E) => 2 * E * Math.log2(E),
+      skew:     (E) => 2 * E * Math.log2(E)
+    };
+
+    const SPACE_COST = {
+      radix:    (E) => E + 33,
+      binomial: (E) => 5 * E,
+      leftist:  (E) => 4 * E,
+      skew:     (E) => 3 * E
+    };
+
+    function buildSeries(cost) {
+      return Object.keys(HEAPS).map((key) => ({
+        key,
+        ...HEAPS[key],
+        values: SIZES.map((v) => cost[key](EDGE_FACTOR * v) / 1000)
+      }));
+    }
+
+    function niceStep(raw) {
+      const pow = Math.pow(10, Math.floor(Math.log10(raw)));
+      const f = raw / pow;
+      return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 5 ? 5 : 10) * pow;
+    }
+
+    function makeLegend(series, detailKey) {
+      const NS = "http://www.w3.org/2000/svg";
+      const legend = document.createElement("div");
+      legend.style.cssText =
+        "display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));" +
+        "gap:10px 16px;margin-top:14px;padding:12px 14px;border:1px solid #e9edf3;" +
+        "border-radius:10px;background:#f8fafc;";
+
+      series.forEach((s) => {
+        const item = document.createElement("div");
+        item.style.cssText = "display:flex;align-items:center;gap:10px;min-width:0;";
+
+        const swatch = document.createElementNS(NS, "svg");
+        swatch.setAttribute("width", "30");
+        swatch.setAttribute("height", "12");
+        swatch.setAttribute("viewBox", "0 0 30 12");
+        swatch.style.flex = "none";
+        const line = document.createElementNS(NS, "line");
+        [["x1", 1], ["x2", 29], ["y1", 6], ["y2", 6], ["stroke", s.color],
+          ["stroke-width", 3], ["stroke-linecap", "round"],
+          ["stroke-dasharray", s.dash ? "6 4" : "none"]]
+          .forEach(([k, v]) => line.setAttribute(k, v));
+        swatch.appendChild(line);
+
+        const text = document.createElement("div");
+        text.style.cssText = "line-height:1.3;min-width:0;";
+        const title = document.createElement("div");
+        title.style.cssText = "font-size:13px;font-weight:700;color:#182230;";
+        title.textContent = s.name;
+        const detail = document.createElement("div");
+        detail.style.cssText = "font-size:11.5px;color:#69788b;";
+        detail.textContent = s[detailKey];
+        text.append(title, detail);
+
+        item.append(swatch, text);
+        legend.appendChild(item);
+      });
+
+      return legend;
+    }
+
+    function renderLineChart(containerId, series, detailKey, yLabel) {
+      const W = 620, H = 330, L = 66, R = 18, T = 14, B = 56;
+      const NS = "http://www.w3.org/2000/svg";
+
+      const maxY = Math.max(...series.flatMap((s) => s.values));
+      const step = niceStep(maxY / 4);
+      const top = step * Math.ceil(maxY / step);
+      const x = (i) => L + (i * (W - L - R)) / (SIZES.length - 1);
+      const y = (v) => T + (1 - v / top) * (H - T - B);
+
+      const svg = document.createElementNS(NS, "svg");
+      svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+      svg.setAttribute("role", "img");
+      svg.style.cssText = "display:block;width:100%;height:auto;overflow:visible;";
+
+      const add = (tag, attrs, text) => {
+        const el = document.createElementNS(NS, tag);
+        Object.entries(attrs).forEach(([k, v]) => el.setAttribute(k, v));
+        if (text !== undefined) el.textContent = text;
+        svg.appendChild(el);
+        return el;
+      };
+
+      const tick = { fill: "#69788b", "font-size": 12, "font-family": "inherit" };
+      const axisTitle = { fill: "#3d4b5f", "font-size": 12.5, "font-weight": 600,
+        "font-family": "inherit", "text-anchor": "middle" };
+
+      for (let v = 0; v <= top + 1e-9; v += step) {
+        add("line", { x1: L, x2: W - R, y1: y(v), y2: y(v), stroke: "#e3e8ef",
+          "stroke-width": 1, "stroke-dasharray": "3 4" });
+        add("text", { ...tick, x: L - 10, y: y(v) + 4, "text-anchor": "end" },
+          Number.isInteger(v) ? v : v.toFixed(1));
+      }
+
+      add("line", { x1: L, x2: W - R, y1: y(0), y2: y(0), stroke: "#b8c2d0", "stroke-width": 1.5 });
+
+      SIZES.forEach((size, i) => {
+        add("text", { ...tick, x: x(i), y: H - B + 20, "text-anchor": "middle" }, size);
+      });
+
+      add("text", { ...axisTitle, x: (L + W - R) / 2, y: H - 6 }, "Number of nodes (V)");
+      add("text", { ...axisTitle, transform: `translate(15 ${(T + H - B) / 2}) rotate(-90)` }, yLabel);
+
+      series.forEach((s) => {
+        add("polyline", {
+          points: s.values.map((v, i) => `${x(i)},${y(v)}`).join(" "),
+          fill: "none",
+          stroke: s.color,
+          "stroke-width": 2.5,
+          "stroke-linejoin": "round",
+          "stroke-dasharray": s.dash || "none"
+        });
+
+        s.values.forEach((v, i) => {
+          const dot = add("circle", { cx: x(i), cy: y(v), r: 4.5, fill: s.color,
+            stroke: "white", "stroke-width": 1.5 });
+          const tip = document.createElementNS(NS, "title");
+          tip.textContent = `${s.name} · V = ${SIZES[i]} · ${v.toFixed(1)}k`;
+          dot.appendChild(tip);
+        });
+      });
+
+      $(containerId).replaceChildren(svg, makeLegend(series, detailKey));
+    }
+
+    function lowestAtLargest(series) {
+      return series.reduce((a, b) =>
+        b.values[b.values.length - 1] < a.values[a.values.length - 1] ? b : a);
+    }
+
+    function renderScalingCharts(results) {
+      const timeSeries = buildSeries(TIME_COST);
+      const spaceSeries = buildSeries(SPACE_COST);
+
+      renderLineChart("time-chart", timeSeries, "time", "Operations (thousands)");
+      renderLineChart("space-chart", spaceSeries, "space", "Memory (thousand words)");
+
+      const last = SIZES[SIZES.length - 1];
+      const measured = results.reduce((a, b) => (b.elapsed_ms < a.elapsed_ms ? b : a));
+      const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
+
+      $("time-note").textContent =
+        `At ${last} nodes, ${lowestAtLargest(timeSeries).name} needs the fewest operations. ` +
+        `Leftist and Skew share the same bound, so their lines overlap. ` +
+        `Fastest on this route: ${cap(measured.heap)} (${measured.elapsed_ms.toFixed(3)} ms).`;
+
+      $("space-note").textContent =
+        `${lowestAtLargest(spaceSeries).name} uses the least memory at ${last} nodes. ` +
+        `All four grow linearly with the number of stored elements.`;
+    }
+
+    async function requestJson(url, options) {
+      const response = await fetch(url, options);
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Request failed.");
+      return data;
+    }
+
+    function installSearch(inputId, resultsId, key) {
+      let debounce = null;
+
+      $(inputId).addEventListener("input", () => {
+        clearTimeout(debounce);
+        selections[key] = null;
+        const query = $(inputId).value.trim();
+        const container = $(resultsId);
+        container.replaceChildren();
+
+        if (query.length < 2) return;
+
+        debounce = setTimeout(async () => {
+          try {
+            const results = await requestJson(
+              `/api/search?q=${encodeURIComponent(query)}`
+            );
+
+            results.forEach((item) => {
+              const button = document.createElement("button");
+              button.type = "button";
+              button.className = "suggestion";
+              button.textContent = `${item.name} · ${item.kind}`;
+
+              button.addEventListener("click", () => {
+                selections[key] = item.name;
+                $(inputId).value = item.name;
+                container.replaceChildren();
+                showMessage(`${key === "start" ? "Start" : "Destination"} selected: ${item.name}`);
+              });
+
+              container.appendChild(button);
+            });
+
+            if (!results.length) {
+              const empty = document.createElement("p");
+              empty.className = "suggestion-empty";
+              empty.textContent = "No matches found.";
+              container.appendChild(empty);
+            }
+          } catch (error) {
+            showMessage(error.message, true);
+          }
+        }, 200);
+      });
+    }
+
+    installSearch("start", "start-results", "start");
+    installSearch("destination", "destination-results", "destination");
+
+    async function getEndpoints() {
+      if (!selections.start || !selections.destination) {
+        throw new Error("Select both locations from the search suggestions.");
+      }
+      return { start: selections.start, destination: selections.destination };
+    }
+
+    $("route-btn").addEventListener("click", async () => {
+      try {
+        showMessage("Calculating shortest route…");
+        const endpoints = await getEndpoints();
+        const result = await requestJson("/api/route", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ...endpoints, heap: $("heap").value })
+        });
+
+        drawRoute(result);
+        renderSummary(result);
+        showMessage("Shortest route calculated successfully.");
+      } catch (error) {
+        showMessage(error.message, true);
+      }
+    });
+
+    $("compare-btn").addEventListener("click", async () => {
+      const button = $("compare-btn");
+      button.disabled = true;
+
+      try {
+        showMessage("Running all four heaps…");
+        const endpoints = await getEndpoints();
+        const data = await requestJson("/api/compare", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(endpoints)
+        });
+
+        const body = $("comparison-body");
+        body.replaceChildren();
+
+        data.results.forEach((result) => {
+          const row = document.createElement("tr");
+          const name = result.heap.charAt(0).toUpperCase() + result.heap.slice(1);
+          [name, `${(result.distance_m / 1000).toFixed(2)} km`,
+            `${result.elapsed_ms.toFixed(3)} ms`, "✓ Correct"].forEach((value) => {
+            const cell = document.createElement("td");
+            cell.textContent = value;
+            row.appendChild(cell);
+          });
+          body.appendChild(row);
+        });
+
+        $("correctness").textContent = data.correctness;
+        renderScalingCharts(data.results);
+        drawRoute(data.results[0]);
+        renderSummary(data.results[0]);
+        showMessage("Comparison complete. All four distances agree.");
+      } catch (error) {
+        showMessage(error.message, true);
+      } finally {
+        button.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>

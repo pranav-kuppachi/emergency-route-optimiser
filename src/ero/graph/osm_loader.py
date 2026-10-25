@@ -13,13 +13,22 @@ def read_osm_file(file_path): #Read .osm file and return it's root element
     root = tree.getroot() #Gets outermost osm element
     return root
 
-def extract_nodes(root): #Extracts node id's and their coordinates from OSM data.
+def extract_nodes(root):
     nodes = {}
     for element in root.findall("node"):
         node_id = element.get("id")
         latitude = float(element.get("lat"))
         longitude = float(element.get("lon"))
-        nodes[node_id] = (latitude, longitude)
+
+        tags = {
+            tag.get("k"): tag.get("v")
+            for tag in element.findall("tag")
+        }
+
+        nodes[node_id] = {
+            "coordinates": (latitude, longitude),
+            "tags": tags,
+        }
     return nodes
 
 def extract_road_ways(root): #Extracts road ways and it's data from OSM
@@ -72,20 +81,36 @@ def calculate_distance(point1, point2):
 
     return max(1, round(distance))
 
-def load_road_graph(file_path): #Load OSM file and return RoadGraph
+
+def load_road_graph(file_path):
     root = read_osm_file(file_path)
     nodes = extract_nodes(root)
     road_ways = extract_road_ways(root)
 
     graph = RoadGraph()
 
+    # Add road nodes with coordinates and any available node names.
     for way in road_ways:
         for node_id in way["node_ids"]:
-            graph.add_location(int(node_id))
+            if node_id not in nodes:
+                continue
 
+            node = nodes[node_id]
+            tags = node["tags"]
+
+            graph.add_location(
+                int(node_id),
+                coordinates=node["coordinates"],
+                name=tags.get("name"),
+                tags=tags,
+            )
+
+    # Add road edges, preserving direction and road names.
     for way in road_ways:
         node_ids = way["node_ids"]
         tags = way["tags"]
+        road_name = tags.get("name")
+
         one_way = tags.get("oneway") == "yes"
         reverse_one_way = tags.get("oneway") == "-1"
 
@@ -96,11 +121,26 @@ def load_road_graph(file_path): #Load OSM file and return RoadGraph
             if source not in nodes or destination not in nodes:
                 continue
 
-            distance = calculate_distance(nodes[source], nodes[destination])
+            distance = calculate_distance(
+                nodes[source]["coordinates"],
+                nodes[destination]["coordinates"],
+            )
 
             if reverse_one_way:
-                graph.add_road(int(destination),int(source),distance,bidirectional=False)
+                graph.add_road(
+                    int(destination),
+                    int(source),
+                    distance,
+                    bidirectional=False,
+                    name=road_name,
+                )
             else:
-                graph.add_road(int(source), int(destination), distance, bidirectional=not one_way)
+                graph.add_road(
+                    int(source),
+                    int(destination),
+                    distance,
+                    bidirectional=not one_way,
+                    name=road_name,
+                )
+
     return graph
-            
